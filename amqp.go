@@ -1,17 +1,30 @@
 package amqp
 
 import (
+	"bytes"
+	"fmt"
+	"time"
+
+	"github.com/Shimmur/proto_schemas_go/rpc"
+	"github.com/Shimmur/proto_schemas_go/types"
+	"github.com/golang/protobuf/jsonpb"
+	"github.com/golang/protobuf/proto"
+	"github.com/google/uuid"
 	amqpDriver "github.com/streadway/amqp"
 	"go.k6.io/k6/js/modules"
 )
 
 const version = "v0.0.1"
 
+var (
+	pbJSONMarshaler = &jsonpb.Marshaler{OrigName: true}
+)
+
 type Amqp struct {
 	Version    string
 	Connection *amqpDriver.Connection
-	Queue     *Queue
-	Exchange  *Exchange
+	Queue      *Queue
+	Exchange   *Exchange
 }
 
 type AmqpOptions struct {
@@ -19,11 +32,14 @@ type AmqpOptions struct {
 }
 
 type PublishOptions struct {
-	QueueName string
-	Body      string
-	Exchange  string
-	Mandatory bool
-	Immediate bool
+	QueueName     string
+	Body          []byte
+	Exchange      string
+	Mandatory     bool
+	Immediate     bool
+	ReplyTo       string
+	CorrelationId string
+	Headers       amqpDriver.Table
 }
 
 type ConsumeOptions struct {
@@ -35,7 +51,7 @@ type ConsumeOptions struct {
 	Args      amqpDriver.Table
 }
 
-type ListenerType func(string) error
+type ListenerType func([]byte) error
 
 type ListenOptions struct {
 	Listener  ListenerType
@@ -46,6 +62,59 @@ type ListenOptions struct {
 	NoLocal   bool
 	NoWait    bool
 	Args      amqpDriver.Table
+}
+
+func (amqp *Amqp) Encode(procedure string, destination string, source string) []byte {
+	event := &rpc.RPC{
+		Type:        rpc.RPC_WITH_REPLY,
+		Procedure:   procedure,
+		Destination: destination,
+		Source:      source,
+		Id:          uuid.NewString(),
+		Timestamp:   time.Now().UnixMicro(),
+		Args: &types.Struct{
+			Fields: map[string]*types.Value{
+				"thread_id": {
+					Kind: &types.Value_StringValue{StringValue: "6025321b-7f3a-4f9c-99f9-9581c6e6f734"},
+				},
+				"sms_campaign_id": {
+					Kind: &types.Value_StringValue{StringValue: "51628409-300f-4beb-b18c-1f1baabbfa8a"},
+				},
+			},
+		},
+	}
+
+	fmt.Printf("%+v\n", event)
+
+	msgbytes, err := proto.Marshal(event)
+	if err != nil {
+		return nil
+	}
+
+	return msgbytes
+}
+
+func (amqp *Amqp) Decode(encodedMsg []byte) *types.Struct {
+	// var msg *rpc.RPCResponse // this is what you want
+	msg := &rpc.RPCResponse{} // all events on the bus are wrapped in this
+
+	// unmarshal to event
+	if err := proto.Unmarshal(encodedMsg, msg); err != nil {
+		fmt.Printf("failed to decode message: %v. error: %v", encodedMsg, err)
+		return nil
+	}
+
+	var buf bytes.Buffer
+
+	err := pbJSONMarshaler.Marshal(&buf, msg)
+
+	if err != nil {
+		fmt.Printf("failed to decode json: %v. error: %v", encodedMsg, err)
+		return nil
+	}
+
+	return msg.GetResponse()
+	// return buf.Bytes()
 }
 
 func (amqp *Amqp) Start(options AmqpOptions) error {
@@ -69,8 +138,11 @@ func (amqp *Amqp) Publish(options PublishOptions) error {
 		options.Mandatory,
 		options.Immediate,
 		amqpDriver.Publishing{
-			ContentType: "text/plain",
-			Body:        []byte(options.Body),
+			ContentType:   "text/plain",
+			Body:          options.Body,
+			CorrelationId: options.CorrelationId,
+			ReplyTo:       options.ReplyTo,
+			Headers:       options.Headers,
 		},
 	)
 }
@@ -97,7 +169,7 @@ func (amqp *Amqp) Listen(options ListenOptions) error {
 
 	go func() {
 		for d := range msgs {
-			options.Listener(string(d.Body))
+			options.Listener(d.Body)
 		}
 	}()
 	return nil
@@ -108,7 +180,7 @@ func init() {
 	queue := Queue{}
 	exchange := Exchange{}
 	generalAmqp := Amqp{
-		Version:   version,
+		Version:  version,
 		Queue:    &queue,
 		Exchange: &exchange,
 	}
