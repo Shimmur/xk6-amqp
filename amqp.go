@@ -101,8 +101,7 @@ func (amqp *Amqp) Encode(procedure string, destination string, source string, pa
 }
 
 func (amqp *Amqp) Decode(encodedMsg []byte) map[string]interface{} {
-	// var msg *rpc.RPCResponse // this is what you want
-	msg := &rpc.RPCResponse{} // all events on the bus are wrapped in this
+	msg := &rpc.RPCResponse{}
 
 	// unmarshal to event
 	if err := proto.Unmarshal(encodedMsg, msg); err != nil {
@@ -110,23 +109,9 @@ func (amqp *Amqp) Decode(encodedMsg []byte) map[string]interface{} {
 		return nil
 	}
 
-	// var buf bytes.Buffer
-
-	// err := pbJSONMarshaler.Marshal(&buf, msg)
-
-	// if err != nil {
-	// 	fmt.Printf("failed to decode json: %v. error: %v", encodedMsg, err)
-	// 	return nil
-	// }
-	// m := make(map[string]interface{})
-
-	// m["something"] = 1
-	// m["another"] = "hello there"
 	m := Struct_to_map(*msg.GetResponse())
-	fmt.Printf("hi: %v", m)
+	// fmt.Printf("hi: %v", m)
 	return m
-	// return msg.GetResponse()
-	// return buf.Bytes()
 }
 
 func (amqp *Amqp) Start(options AmqpOptions) error {

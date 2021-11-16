@@ -32,16 +32,32 @@ func get_type(i interface{}) *types.Value {
 	switch i.(type) {
 	case bool:
 		return &types.Value{Kind: &types.Value_BoolValue{BoolValue: i.(bool)}}
-	case types.NullValue:
-		return &types.Value{Kind: &types.Value_NullValue{NullValue: i.(types.NullValue)}}
+	case nil:
+		return &types.Value{Kind: &types.Value_NullValue{}}
 	case int64:
 		return &types.Value{Kind: &types.Value_IntValue{IntValue: i.(int64)}}
 	case float64:
 		return &types.Value{Kind: &types.Value_DoubleValue{DoubleValue: i.(float64)}}
 	case string:
 		return &types.Value{Kind: &types.Value_StringValue{StringValue: i.(string)}}
+	case []interface{}:
+		var vals = []*types.Value{}
+
+		for _, v := range i.([]interface{}) {
+			vals = append(vals, get_type(v))
+		}
+		return &types.Value{Kind: &types.Value_ListValue{ListValue: &types.ListValue{Values: vals}}}
+
+	case map[string]interface{}:
+		var fields = make(map[string]*types.Value)
+
+		for k, v := range i.(map[string]interface{}) {
+			fields[k] = get_type(v)
+		}
+
+		return &types.Value{Kind: &types.Value_StructValue{StructValue: &types.Struct{Fields: fields}}}
 	default:
-		fmt.Printf("Couldnt get type for (%v), type:", i)
+		fmt.Printf("Couldnt get type for (%v), type: %T\n", i, i)
 		return nil
 	}
 }
