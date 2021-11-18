@@ -1,11 +1,14 @@
 package amqp
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/Shimmur/proto_schemas_go/rpc"
-	"github.com/golang/protobuf/jsonpb"
+	// "google.golang.org/protobuf/proto"
+
+	// "github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	amqpDriver "github.com/streadway/amqp"
@@ -13,10 +16,6 @@ import (
 )
 
 const version = "v0.0.1"
-
-var (
-	pbJSONMarshaler = &jsonpb.Marshaler{OrigName: true}
-)
 
 type Amqp struct {
 	Version    string
@@ -41,12 +40,15 @@ type PublishOptions struct {
 }
 
 type ConsumeOptions struct {
-	Consumer  string
-	AutoAck   bool
-	Exclusive bool
-	NoLocal   bool
-	NoWait    bool
-	Args      amqpDriver.Table
+	Consumer     string
+	QueueName    string
+	AutoAck      bool
+	Exclusive    bool
+	NoLocal      bool
+	NoWait       bool
+	Args         amqpDriver.Table
+	MessageCount int
+	Timeout      int
 }
 
 type ListenerType func([]byte) error
@@ -63,14 +65,9 @@ type ListenOptions struct {
 }
 
 func (amqp *Amqp) Encode(procedure string, destination string, source string, params map[string]interface{}) []byte {
-	// m is a map[string]interface.
-	// loop over keys and values in the map.
-	for k, v := range params {
-		fmt.Println(k, "value is", v)
-	}
 	args := Map_to_struct(params)
-	fmt.Printf("build: %v \n", args)
-	event := &rpc.RPC{
+
+	rpc := &rpc.RPC{
 		Type:        rpc.RPC_WITH_REPLY,
 		Procedure:   procedure,
 		Destination: destination,
@@ -78,21 +75,9 @@ func (amqp *Amqp) Encode(procedure string, destination string, source string, pa
 		Id:          uuid.NewString(),
 		Timestamp:   time.Now().UnixMicro(),
 		Args:        args,
-		// Args: &types.Struct{
-		// 	Fields: map[string]*types.Value{
-		// 		"thread_id": {
-		// 			Kind: &types.Value_StringValue{StringValue: "6025321b-7f3a-4f9c-99f9-9581c6e6f734"},
-		// 		},
-		// 		"sms_campaign_id": {
-		// 			Kind: &types.Value_StringValue{StringValue: "51628409-300f-4beb-b18c-1f1baabbfa8a"},
-		// 		},
-		// 	},
-		// },
 	}
 
-	fmt.Printf("%+v\n", event)
-
-	msgbytes, err := proto.Marshal(event)
+	msgbytes, err := proto.Marshal(rpc)
 	if err != nil {
 		return nil
 	}
@@ -169,6 +154,101 @@ func (amqp *Amqp) Listen(options ListenOptions) error {
 			options.Listener(d.Body)
 		}
 	}()
+	return nil
+}
+
+func (amqp *Amqp) ConsumeRPC(opts ConsumeOptions) []map[string]interface{} {
+	ch, err := amqp.Connection.Channel()
+	if err != nil {
+		fmt.Printf("errored opening channel: %v\n", err)
+		return nil
+	}
+	defer ch.Close()
+
+	if opts.MessageCount == 0 {
+		opts.MessageCount = 1
+	}
+
+	if opts.Timeout == 0 {
+		opts.Timeout = 1000
+	}
+
+	if opts.Consumer == "" {
+		opts.Consumer = "k6-consumer-auto"
+	}
+
+	msgs, err := ch.Consume(
+		opts.QueueName,
+		opts.Consumer,
+		true, //auto ack
+		opts.Exclusive,
+		opts.NoLocal,
+		opts.NoWait,
+		opts.Args,
+	)
+	if err != nil {
+		fmt.Printf("errored consuming: %v\n", err)
+		return nil
+	}
+
+	var messages []map[string]interface{}
+
+	c := make(chan map[string]interface{}, 2)
+	go func() {
+		for m := range msgs {
+			decoded := amqp.Decode(m.Body)
+			if decoded != nil {
+				c <- decoded
+			}
+		}
+	}()
+
+	for {
+		select {
+		case res := <-c:
+			// fmt.Printf("got body: %v\n\n", res)
+			messages = append(messages, res)
+
+			if len(messages) >= opts.MessageCount {
+				close(c)
+				// fmt.Print("max message count")
+				return messages
+			}
+		case <-time.After(time.Duration(opts.Timeout) * time.Millisecond):
+			fmt.Println("timeout")
+			return nil
+		}
+	}
+}
+
+func (amqp *Amqp) ConsumeSingleRPC(opts ConsumeOptions) interface{} {
+	opts.MessageCount = 1
+	messages := amqp.ConsumeRPC(opts)
+	if messages != nil {
+		return messages[0]
+	}
+
+	return nil
+}
+
+func (amqp *Amqp) PublishRPC(pubOpts PublishOptions, procedure string, destination string, source string, params map[string]interface{}) error {
+	encoded := amqp.Encode(procedure, destination, source, params)
+
+	if encoded == nil {
+		return errors.New("failed to encode rpc message")
+	}
+	pubOpts.Body = encoded
+
+	if pubOpts.Exchange == "" {
+		pubOpts.Exchange = "rpc"
+	}
+
+	if pubOpts.Headers == nil {
+		pubOpts.Headers = amqpDriver.Table{}
+	}
+	pubOpts.Headers["destination"] = destination
+
+	amqp.Publish(pubOpts)
 	return nil
 }
 
