@@ -1,14 +1,12 @@
 package amqp
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/Shimmur/proto_schemas_go/rpc"
-	// "google.golang.org/protobuf/proto"
-
-	// "github.com/golang/protobuf/jsonpb"
 	"github.com/golang/protobuf/proto"
 	"github.com/google/uuid"
 	amqpDriver "github.com/streadway/amqp"
@@ -64,7 +62,8 @@ type ListenOptions struct {
 	Args      amqpDriver.Table
 }
 
-func (amqp *Amqp) Encode(procedure string, destination string, source string, params map[string]interface{}) []byte {
+func (amqp *Amqp) Encode(ctx context.Context, procedure string, destination string, source string, params map[string]interface{}) []byte {
+	start := time.Now()
 	args := Map_to_struct(params)
 
 	rpc := &rpc.RPC{
@@ -81,11 +80,12 @@ func (amqp *Amqp) Encode(procedure string, destination string, source string, pa
 	if err != nil {
 		return nil
 	}
-
+	ObserveTrend(ctx, RPCEncoding, time.Since(start).Seconds())
 	return msgbytes
 }
 
-func (amqp *Amqp) Decode(encodedMsg []byte) map[string]interface{} {
+func (amqp *Amqp) Decode(ctx context.Context, encodedMsg []byte) map[string]interface{} {
+	start := time.Now()
 	msg := &rpc.RPCResponse{}
 
 	// unmarshal to event
@@ -95,7 +95,7 @@ func (amqp *Amqp) Decode(encodedMsg []byte) map[string]interface{} {
 	}
 
 	m := Struct_to_map(*msg.GetResponse())
-	// fmt.Printf("hi: %v", m)
+	ObserveTrend(ctx, RPCDecoding, time.Since(start).Seconds())
 	return m
 }
 
@@ -157,7 +157,7 @@ func (amqp *Amqp) Listen(options ListenOptions) error {
 	return nil
 }
 
-func (amqp *Amqp) ConsumeRPC(opts ConsumeOptions) []map[string]interface{} {
+func (amqp *Amqp) ConsumeRPC(ctx context.Context, opts ConsumeOptions) []map[string]interface{} {
 	ch, err := amqp.Connection.Channel()
 	if err != nil {
 		fmt.Printf("errored opening channel: %v\n", err)
@@ -193,25 +193,27 @@ func (amqp *Amqp) ConsumeRPC(opts ConsumeOptions) []map[string]interface{} {
 
 	var messages []map[string]interface{}
 
-	c := make(chan map[string]interface{}, 2)
+	c := make(chan amqpDriver.Delivery, 1)
 	go func() {
 		for m := range msgs {
-			decoded := amqp.Decode(m.Body)
-			if decoded != nil {
-				c <- decoded
-			}
+			c <- m
 		}
 	}()
 
 	for {
 		select {
 		case res := <-c:
-			// fmt.Printf("got body: %v\n\n", res)
-			messages = append(messages, res)
+			tags := generateRPCTags(res)
+
+			decoded := amqp.Decode(ctx, res.Body)
+			if decoded != nil {
+				messages = append(messages, decoded)
+			}
+
+			IncrementCounterWithTags(ctx, RPCConsumeCounter, tags)
 
 			if len(messages) >= opts.MessageCount {
 				close(c)
-				// fmt.Print("max message count")
 				return messages
 			}
 		case <-time.After(time.Duration(opts.Timeout) * time.Millisecond):
@@ -221,9 +223,9 @@ func (amqp *Amqp) ConsumeRPC(opts ConsumeOptions) []map[string]interface{} {
 	}
 }
 
-func (amqp *Amqp) ConsumeSingleRPC(opts ConsumeOptions) interface{} {
+func (amqp *Amqp) ConsumeSingleRPC(ctx context.Context, opts ConsumeOptions) interface{} {
 	opts.MessageCount = 1
-	messages := amqp.ConsumeRPC(opts)
+	messages := amqp.ConsumeRPC(ctx, opts)
 	if messages != nil {
 		return messages[0]
 	}
@@ -231,8 +233,8 @@ func (amqp *Amqp) ConsumeSingleRPC(opts ConsumeOptions) interface{} {
 	return nil
 }
 
-func (amqp *Amqp) PublishRPC(pubOpts PublishOptions, procedure string, destination string, source string, params map[string]interface{}) error {
-	encoded := amqp.Encode(procedure, destination, source, params)
+func (amqp *Amqp) PublishRPC(ctx context.Context, pubOpts PublishOptions, procedure string, destination string, source string, params map[string]interface{}) error {
+	encoded := amqp.Encode(ctx, procedure, destination, source, params)
 
 	if encoded == nil {
 		return errors.New("failed to encode rpc message")
@@ -248,12 +250,33 @@ func (amqp *Amqp) PublishRPC(pubOpts PublishOptions, procedure string, destinati
 	}
 	pubOpts.Headers["destination"] = destination
 
+	tags := map[string]string{
+		"source":     source,
+		"desination": destination,
+		"procedure":  procedure,
+		"exchange":   pubOpts.Exchange,
+	}
+	IncrementCounterWithTags(ctx, RPCPublishCounter, tags)
+
 	amqp.Publish(pubOpts)
 	return nil
 }
 
-func init() {
+func generateRPCTags(msg amqpDriver.Delivery) map[string]string {
+	t := map[string]string{}
 
+	t["exchange"] = msg.Exchange
+	t["routing_key"] = msg.RoutingKey
+	t["reply_to"] = msg.ReplyTo
+
+	if val, ok := msg.Headers["destination"]; ok {
+		t["destination"] = val.(string)
+	}
+
+	return t
+}
+
+func init() {
 	queue := Queue{}
 	exchange := Exchange{}
 	generalAmqp := Amqp{
