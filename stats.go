@@ -9,13 +9,13 @@ import (
 	"go.k6.io/k6/stats"
 )
 
-const stats_prefix = "k6_amqp"
+const statsPrefix = "k6_amqp"
 
 var (
-	RPCPublishCounter = stats.New(fmt.Sprintf("%s_rpc_published_total", stats_prefix), stats.Counter)
-	RPCConsumeCounter = stats.New(fmt.Sprintf("%s_rpc_consumed_total", stats_prefix), stats.Counter)
-	RPCEncoding       = stats.New(fmt.Sprintf("%s_rpc_encoding_duration", stats_prefix), stats.Trend)
-	RPCDecoding       = stats.New(fmt.Sprintf("%s_rpc_decoding_duration", stats_prefix), stats.Trend)
+	RPCPublishCounter = stats.New(fmt.Sprintf("%s_rpc_published_total", statsPrefix), stats.Counter)
+	RPCConsumeCounter = stats.New(fmt.Sprintf("%s_rpc_consumed_total", statsPrefix), stats.Counter)
+	RPCEncoding       = stats.New(fmt.Sprintf("%s_rpc_encoding_duration", statsPrefix), stats.Trend)
+	RPCDecoding       = stats.New(fmt.Sprintf("%s_rpc_decoding_duration", statsPrefix), stats.Trend)
 )
 
 func IncrementCounter(ctx context.Context, counter *stats.Metric) {

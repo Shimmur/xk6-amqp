@@ -6,12 +6,12 @@ import (
 	"github.com/Shimmur/proto_schemas_go/types"
 )
 
-func Map_to_struct(m map[string]interface{}) *types.Struct {
+func MapToStruct(m map[string]interface{}) *types.Struct {
 	var t = &types.Struct{}
 	var fields = make(map[string]*types.Value)
 
 	for k, v := range m {
-		typed := get_type(v)
+		typed := getType(v)
 		fields[k] = typed
 	}
 	t.Fields = fields
@@ -19,16 +19,15 @@ func Map_to_struct(m map[string]interface{}) *types.Struct {
 	return t
 }
 
-func Struct_to_map(s types.Struct) map[string]interface{} {
+func StructToMap(s types.Struct) map[string]interface{} {
 	m := make(map[string]interface{})
 	for k, v := range s.Fields {
-		m[k] = get_real(v.Kind)
+		m[k] = getReal(v.Kind)
 	}
 	return m
 }
 
-//TODO: figure out the struct/list types
-func get_type(i interface{}) *types.Value {
+func getType(i interface{}) *types.Value {
 	switch i := i.(type) {
 	case bool:
 		return &types.Value{Kind: &types.Value_BoolValue{BoolValue: i}}
@@ -44,7 +43,7 @@ func get_type(i interface{}) *types.Value {
 		var vals = []*types.Value{}
 
 		for _, v := range i {
-			vals = append(vals, get_type(v))
+			vals = append(vals, getType(v))
 		}
 		return &types.Value{Kind: &types.Value_ListValue{ListValue: &types.ListValue{Values: vals}}}
 
@@ -52,7 +51,7 @@ func get_type(i interface{}) *types.Value {
 		var fields = make(map[string]*types.Value)
 
 		for k, v := range i {
-			fields[k] = get_type(v)
+			fields[k] = getType(v)
 		}
 
 		return &types.Value{Kind: &types.Value_StructValue{StructValue: &types.Struct{Fields: fields}}}
@@ -62,7 +61,7 @@ func get_type(i interface{}) *types.Value {
 	}
 }
 
-func get_real(i interface{}) interface{} {
+func getReal(i interface{}) interface{} {
 	switch i := i.(type) {
 	case *types.Value_StringValue:
 		return i.StringValue
@@ -78,14 +77,14 @@ func get_real(i interface{}) interface{} {
 		var real []interface{}
 
 		for _, v := range i.ListValue.Values {
-			real = append(real, get_real(v.Kind))
+			real = append(real, getReal(v.Kind))
 		}
 		return real
 	case *types.Value_StructValue:
 		var real = make(map[string]interface{})
 
 		for k, v := range i.StructValue.Fields {
-			real[k] = get_real(v.Kind)
+			real[k] = getReal(v.Kind)
 		}
 		return real
 	default:

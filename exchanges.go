@@ -10,7 +10,7 @@ type Exchange struct {
 }
 
 type ExchangeOptions struct {
-	ConnectionUrl string
+	ConnectionURL string
 }
 
 type ExchangeDeclareOptions struct {

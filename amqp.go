@@ -15,15 +15,15 @@ import (
 
 const version = "v0.0.1"
 
-type Amqp struct {
+type AMQP struct {
 	Version    string
 	Connection *amqpDriver.Connection
 	Queue      *Queue
 	Exchange   *Exchange
 }
 
-type AmqpOptions struct {
-	ConnectionUrl string
+type AMQPOptions struct {
+	ConnectionURL string
 }
 
 type PublishOptions struct {
@@ -33,7 +33,7 @@ type PublishOptions struct {
 	Mandatory     bool
 	Immediate     bool
 	ReplyTo       string
-	CorrelationId string
+	CorrelationID string
 	Headers       amqpDriver.Table
 }
 
@@ -62,9 +62,9 @@ type ListenOptions struct {
 	Args      amqpDriver.Table
 }
 
-func (amqp *Amqp) Encode(ctx context.Context, procedure string, destination string, source string, params map[string]interface{}) []byte {
+func (amqp *AMQP) Encode(ctx context.Context, procedure string, destination string, source string, params map[string]interface{}) []byte {
 	start := time.Now()
-	args := Map_to_struct(params)
+	args := MapToStruct(params)
 
 	rpc := &rpc.RPC{
 		Type:        rpc.RPC_WITH_REPLY,
@@ -84,7 +84,7 @@ func (amqp *Amqp) Encode(ctx context.Context, procedure string, destination stri
 	return msgbytes
 }
 
-func (amqp *Amqp) Decode(ctx context.Context, encodedMsg []byte) map[string]interface{} {
+func (amqp *AMQP) Decode(ctx context.Context, encodedMsg []byte) map[string]interface{} {
 	start := time.Now()
 	msg := &rpc.RPCResponse{}
 
@@ -94,20 +94,20 @@ func (amqp *Amqp) Decode(ctx context.Context, encodedMsg []byte) map[string]inte
 		return nil
 	}
 
-	m := Struct_to_map(*msg.GetResponse())
+	m := StructToMap(*msg.GetResponse())
 	ObserveTrend(ctx, RPCDecoding, time.Since(start).Seconds())
 	return m
 }
 
-func (amqp *Amqp) Start(options AmqpOptions) error {
-	conn, err := amqpDriver.Dial(options.ConnectionUrl)
+func (amqp *AMQP) Start(options AMQPOptions) error {
+	conn, err := amqpDriver.Dial(options.ConnectionURL)
 	amqp.Connection = conn
 	amqp.Queue.Connection = conn
 	amqp.Exchange.Connection = conn
 	return err
 }
 
-func (amqp *Amqp) Publish(options PublishOptions) error {
+func (amqp *AMQP) Publish(options PublishOptions) error {
 	ch, err := amqp.Connection.Channel()
 	if err != nil {
 		return err
@@ -122,14 +122,14 @@ func (amqp *Amqp) Publish(options PublishOptions) error {
 		amqpDriver.Publishing{
 			ContentType:   "text/plain",
 			Body:          options.Body,
-			CorrelationId: options.CorrelationId,
+			CorrelationId: options.CorrelationID,
 			ReplyTo:       options.ReplyTo,
 			Headers:       options.Headers,
 		},
 	)
 }
 
-func (amqp *Amqp) Listen(options ListenOptions) error {
+func (amqp *AMQP) Listen(options ListenOptions) error {
 	ch, err := amqp.Connection.Channel()
 	if err != nil {
 		return err
@@ -157,7 +157,7 @@ func (amqp *Amqp) Listen(options ListenOptions) error {
 	return nil
 }
 
-func (amqp *Amqp) ConsumeRPC(ctx context.Context, opts ConsumeOptions) []map[string]interface{} {
+func (amqp *AMQP) ConsumeRPC(ctx context.Context, opts ConsumeOptions) []map[string]interface{} {
 	ch, err := amqp.Connection.Channel()
 	if err != nil {
 		fmt.Printf("errored opening channel: %v\n", err)
@@ -223,7 +223,7 @@ func (amqp *Amqp) ConsumeRPC(ctx context.Context, opts ConsumeOptions) []map[str
 	}
 }
 
-func (amqp *Amqp) ConsumeSingleRPC(ctx context.Context, opts ConsumeOptions) interface{} {
+func (amqp *AMQP) ConsumeSingleRPC(ctx context.Context, opts ConsumeOptions) interface{} {
 	opts.MessageCount = 1
 	messages := amqp.ConsumeRPC(ctx, opts)
 	if messages != nil {
@@ -233,7 +233,7 @@ func (amqp *Amqp) ConsumeSingleRPC(ctx context.Context, opts ConsumeOptions) int
 	return nil
 }
 
-func (amqp *Amqp) PublishRPC(ctx context.Context, pubOpts PublishOptions, procedure string, destination string, source string, params map[string]interface{}) error {
+func (amqp *AMQP) PublishRPC(ctx context.Context, pubOpts PublishOptions, procedure string, destination string, source string, params map[string]interface{}) error {
 	encoded := amqp.Encode(ctx, procedure, destination, source, params)
 
 	if encoded == nil {
@@ -279,13 +279,13 @@ func generateRPCTags(msg amqpDriver.Delivery) map[string]string {
 func init() {
 	queue := Queue{}
 	exchange := Exchange{}
-	generalAmqp := Amqp{
+	generalAMQP := AMQP{
 		Version:  version,
 		Queue:    &queue,
 		Exchange: &exchange,
 	}
 
-	modules.Register("k6/x/amqp", &generalAmqp)
+	modules.Register("k6/x/amqp", &generalAMQP)
 	modules.Register("k6/x/amqp/queue", &queue)
 	modules.Register("k6/x/amqp/exchange", &exchange)
 }
