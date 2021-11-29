@@ -10,7 +10,7 @@ type Queue struct {
 }
 
 type QueueOptions struct {
-	ConnectionUrl string
+	ConnectionURL string
 }
 
 type DeclareOptions struct {
